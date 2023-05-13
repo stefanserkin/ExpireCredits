@@ -4,6 +4,7 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
     
     public static final String BATCH_NAME = 'TRec Credit Expiration Batch';
     private static final String ADJUSTMENT_DESCRIPTION = 'Expired credits';
+    private static final String GBG_NAME = 'Asphalt Green';
 
     private static Id tliRecTypeId = Schema.SObjectType.TREX1__Transaction_Line_Item__c.getRecordTypeInfosByDeveloperName().get('Manual_Adjustment').getRecordTypeId();
     private static Id gbgId;
@@ -20,7 +21,7 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
     public void execute(Database.BatchableContext bc, List<Account> lstAccounts) {
         // Set GBG id
         if (gbgId == null) {
-            gbgId = [SELECT Id FROM TREX1__Global_Billing_Group__c WHERE Name = 'Asphalt Green' LIMIT 1].Id;
+            gbgId = [SELECT Id FROM TREX1__Global_Billing_Group__c WHERE Name = :GBG_NAME LIMIT 1].Id;
         }
 
         // Set AR gl info
