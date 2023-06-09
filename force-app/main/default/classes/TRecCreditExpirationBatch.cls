@@ -1,8 +1,9 @@
 public with sharing class TRecCreditExpirationBatch implements Database.Batchable<sObject> {
     
     public static final String BATCH_NAME = 'TRec Credit Expiration Batch';
-    private static final String ADJUSTMENT_DESCRIPTION = 'Expired credits';
+    private static final String ADJUSTMENT_DESCRIPTION = 'Credit Expiration';
 
+    private static Id recTypeId = Schema.SObjectType.Account.getRecordTypeInfosByDeveloperName().get('HH_Account').getRecordTypeId();
     private static Id tliRecTypeId = Schema.SObjectType.TREX1__Transaction_Line_Item__c.getRecordTypeInfosByDeveloperName().get('Manual_Adjustment').getRecordTypeId();
     private static Id gbgId;
 
@@ -13,34 +14,40 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
     private static Decimal daysUntilCreditExpiration;
     private static Boolean globalGlInfoIsSet = false;
 
-    private static Integer batchCounter = 0;
+    private static Id taskUserId;
+
+    private static final String TASK_STATUS = 'Completed';
+    private static final String TASK_PRIORITY = 'Normal';
+    private static final String TASK_TYPE = 'System';
 
     public Database.QueryLocator start(Database.BatchableContext bc) {
-        // Set global gl info
-        if (!globalGlInfoIsSet) {
-            setGlInfo();
-            globalGlInfoIsSet = true;
-            System.debug(':::::: expiration gl code after global accs are set: ' + expiredCreditGlCode);
-            System.debug(':::::: expiration gl account name after global accs are set: ' + expiredCreditGlAccountName);
-            System.debug(':::::: num days until expiration after global accs are set: ' + String.valueOf(daysUntilCreditExpiration));
-        }
-        // Get all account ids with credits to expire
+        Integer daysUntilExpiration = Integer.valueOf(TREX1__Global_GL_Accounts__c.getOrgDefaults().Days_Until_Credit_Expiration__c);
+
+        // Activate trigger bypass for manual adjustment sobject types
+        TRecTriggerBypass bypass = new TRecTriggerBypass();
+        bypass.addObject('TREX1__Transaction__c');
+        bypass.addObject('TREX1__Transaction_Line_Item__c');
+        bypass.addObject('TREX1__Accounting_Event__c');
+        bypass.addObject('TREX1__Journal_Entry__c');
+        bypass.bypassAll(BATCH_NAME);
+
+        // Get all household account ids with credits to expire
         // Accounts will be re-queried for journal entry details within the execute method
-        String strQuery = 'SELECT Id FROM Account WHERE Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c' +
+        String strQuery = 'SELECT Id FROM Account WHERE RecordTypeId = :recTypeId AND Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c' +
             ' WHERE TREX1__Unapplied_Credit_Amount__c > 0' +
-            ' AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + String.valueOf(daysUntilCreditExpiration) + ')';
+            ' AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + daysUntilExpiration + ')';
         return Database.getQueryLocator(strQuery);
     }
 
     public void execute(Database.BatchableContext bc, List<Account> lstAccounts) {
-        // Increment batch counter
-        batchCounter++;
-
-        // Set GBG id
-        if (gbgId == null) {
-            gbgId = [SELECT Id FROM TREX1__Global_Billing_Group__c WHERE Name = 'Asphalt Green' LIMIT 1].Id;
-            System.debug(':::::: set gbgId: ' + gbgId);
+        // Set global gl info for accounts receivable and credit expiration
+        if (!globalGlInfoIsSet) {
+            setGlInfo();
+            globalGlInfoIsSet = true;
         }
+
+        // Create list of tasks for account
+        List<Task> lstTasks = new List<Task>();
         
         // Get a list of accounts with expired credit child jes
         List<Account> lstAccsWithCredits = getAccountWithCredits(lstAccounts);
@@ -66,7 +73,6 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             );
         }
         insert lstTransactions;
-        System.debug(':::::: Created ' + lstTransactions.size() + ' transactions in batch ' + String.valueOf(batchCounter));
 
         // Create one transaction line item for each transaction
         List<TREX1__Transaction_Line_Item__c> lstTlis = new List<TREX1__Transaction_Line_Item__c>();
@@ -76,7 +82,6 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             );
         }
         insert lstTlis;
-        System.debug(':::::: Created ' + lstTlis.size() + ' tlis in batch ' + String.valueOf(batchCounter));
 
         // Create one accounting event for each transaction line item
         List<TREX1__Accounting_Event__c> lstAccountingEvents = new List<TREX1__Accounting_Event__c>();
@@ -86,7 +91,6 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             );
         }
         insert lstAccountingEvents;
-        System.debug(':::::: Created ' + lstAccountingEvents.size() + ' accounting events in batch ' + String.valueOf(batchCounter));
 
         // Create two journal entries for each accounting event
         List<TREX1__Journal_Entry__c> lstJEs = new List<TREX1__Journal_Entry__c>();
@@ -96,17 +100,22 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             );
         }
         insert lstJEs;
-        System.debug(':::::: Created ' + lstJEs.size() + ' journal entries in batch ' + String.valueOf(batchCounter));
         
-        // Add debit jes to map for easier assignment in links
+        // Add ar debit jes to map for easier assignment in links
         Map<Id, Id> mapAccIdToDebitArJeId = new Map<Id, Id>();
         for (TREX1__Journal_Entry__c je : lstJEs) {
-            mapAccIdToDebitArJeId.put(je.TREX1__Account__c, je.Id);
+            if (je.TREX1__GL_Code__c == arGlCode) {
+                mapAccIdToDebitArJeId.put(je.TREX1__Account__c, je.Id);
+            }
         }
 
         // Link debit jes to expiring credits
+        List<Account> lstAccsToUpdate = new List<Account>();
         List<TREX1__Payment_Link__c> lstPaymentLinks = new List<TREX1__Payment_Link__c>();
         for (Account acc : lstAccsWithCredits) {
+            // Track total amount applied to validate and reduce the total credit on the account record
+            Decimal totalCreditsApplied = 0;
+            Date jeIssueDate;
             for (TREX1__Journal_Entry__c je : acc.TREX1__Journal_Entries__r) {
                 lstPaymentLinks.add(
                     new TREX1__Payment_Link__c(
@@ -115,14 +124,39 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
                         TREX1__Amount__c = je.TREX1__Unapplied_Credit_Amount__c
                     )
                 );
+                totalCreditsApplied += je.TREX1__Unapplied_Credit_Amount__c;
+                jeIssueDate = je.TREX1__Effective_Date_Time__c.date();
             }
+            Decimal totalRemainingCredits = acc.TREX1__Unapplied_Credit_Amount__c - totalCreditsApplied;
+            lstAccsToUpdate.add( new Account(Id = acc.Id, TREX1__Unapplied_Credit_Amount__c = totalRemainingCredits));
+            // Create task for account record
+            String strDescription = 'Credits expired: $' + totalCreditsApplied.format() + '\n' + 
+                'Credit issued on ' + jeIssueDate.format() + '\n' +
+                'Credit expired on ' + Date.today().format();
+            lstTasks.add(
+                new Task(
+                    Subject = ADJUSTMENT_DESCRIPTION,
+                    Description = strDescription,
+                    OwnerId = getTaskUserId(),
+                    Status = TASK_STATUS,
+                    Priority = TASK_PRIORITY,
+                    Type = TASK_TYPE,
+                    WhatId = acc.Id
+                )
+            );
         }
         insert lstPaymentLinks;
-        System.debug(':::::: Created ' + lstPaymentLinks.size() + ' payment links in batch ' + String.valueOf(batchCounter));
+        update lstAccsToUpdate;
+        insert lstTasks;
 
     }
 
     public void finish(Database.BatchableContext bc) {
+
+        // Disable Traction Rec trigger bypass for the sobject types
+        TRecTriggerBypass bypass = new TRecTriggerBypass();
+        bypass.disableAllBypasses();
+        
         AsyncApexJob apexJob = [
             SELECT Id, 
                    Status, 
@@ -170,8 +204,9 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             TREX1__Account__c = acc.Id, 
             TREX1__Contact__c = acc.npe01__One2OneContact__c, 
             TREX1__Created_Online__c = false, 
-            TREX1__Status__c = 'Close', 
-            TREX1__Exclude_From_Automatic_Cleanup__c = false 
+            TREX1__Status__c = 'Close', // this should be draft and updated to 'Firmed'
+            TREX1__Exclude_From_Automatic_Cleanup__c = false, 
+            TREX1__Parent_Flow__c = 'Customer Account Adjustment'
         );
     }
 
@@ -180,12 +215,12 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
         Decimal amount
     ) {
         return new TREX1__Transaction_Line_Item__c(
+            RecordTypeId = tliRecTypeId,                              // Record Type (manual adjustment)
             TREX1__Account__c = trans.TREX1__Account__c,                          // Account
             TREX1__Effective_Date__c = Date.today(),                // Effective Date
             TREX1__Contact__c = trans.TREX1__Contact__c,                          // Contact
             TREX1__Transaction__c = trans.Id,                       // Transaction
             TREX1__Transaction_Contact__c = trans.TREX1__Contact__c,              // Transaction Contact
-            RecordTypeId = tliRecTypeId,                              // Record Type
             TREX1__Description__c = ADJUSTMENT_DESCRIPTION,                // Description
             TREX1__Status__c = 'Complete',                            // Status
             TREX1__Type__c = 'Item Event',                            // Type
@@ -197,9 +232,9 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             TREX1__Initial_Fee_Amount__c = amount,            // Initial Fee Amount
             TREX1__Is_Edited__c = false,                              // Is Edited
             TREX1__Override_Price__c = false,                         // Override Price
-            TREX1__tli_Global_Billing_Group__c = gbgId,               // Global Billing Group
+            TREX1__tli_Global_Billing_Group__c = getGbgId(),               // Global Billing Group
             TREX1__Override_Prerequisites__c = false,                 // Override Prerequisites
-            TREX1__Deferred_Revenue_Recognition_Finished__c = false,  // Deferred Revenue Recognition Finished
+            TREX1__Deferred_Revenue_Recognition_Finished__c = true,  // Deferred Revenue Recognition Finished
             TREX1__Total_Deferred_Revenue__c = 0.00                   // Total Deferred Revenue
         );
     }
@@ -212,10 +247,10 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             TREX1__System_Generated__c = false,                                          // System Generated
             TREX1__Type__c = 'Manual Adjustment',                                        // Type
             TREX1__Transaction__c = tli.TREX1__Transaction__c,                           // Transaction
-            TREX1__Effective_Date_Time__c = Datetime.now(),  // Effective Date Time
+            TREX1__Effective_Date_Time__c = Datetime.now(),                              // Effective Date Time
             TREX1__Transaction_Line_Item__c = tli.Id,                                    // Transaction Line Item
             TREX1__Total__c = amount,                                                    // Total
-            TREX1__Annotation__c = ADJUSTMENT_DESCRIPTION,                                   // Annotation
+            TREX1__Annotation__c = ADJUSTMENT_DESCRIPTION,                               // Annotation
             TREX1__Account__c = tli.TREX1__Account__c,                                   // Account
             TREX1__Contact__c = tli.TREX1__Contact__c
         );
@@ -228,19 +263,20 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
         List<TREX1__Journal_Entry__c> lstJEs = new List<TREX1__Journal_Entry__c>();
 
         TREX1__Journal_Entry__c debitJe = new TREX1__Journal_Entry__c(
-            TREX1__Effective_Date_Time__c = Datetime.now(),  // Effective Date Time
-            TREX1__Account__c = ae.TREX1__Account__c,                                             // Account
-            TREX1__Contact__c = ae.TREX1__Contact__c,                                             // Contact
+            TREX1__Effective_Date_Time__c = Datetime.now(),                              // Effective Date Time
+            TREX1__Account__c = ae.TREX1__Account__c,                                    // Account
+            TREX1__Contact__c = ae.TREX1__Contact__c,                                    // Contact
             TREX1__Type__c = 'Manual Adjustment',                                        // Type
-            TREX1__Accounting_Event__c = ae.Id,                                    // Accounting Event
-            TREX1__GL_Code__c = arGlCode,                                       // GL Code
-            TREX1__Annotation__c = ADJUSTMENT_DESCRIPTION,                                    // Annotation
+            TREX1__Accounting_Event__c = ae.Id,                                          // Accounting Event
+            TREX1__GL_Code__c = arGlCode,                                                // GL Code
+            TREX1__Annotation__c = ADJUSTMENT_DESCRIPTION,                               // Annotation
             TREX1__Debit__c = amount,                                                    // Debit
             TREX1__Credit__c = 0.00,                                                     // Credit
             TREX1__Is_Tax__c = false,                                                    // Is Tax
-            GL_Account_Name__c = arGlAccountName,                                  // GL Account Name
+            GL_Account_Name__c = arGlAccountName,                                        // GL Account Name
             TREX1__Allow_Unapply_Cred_In_Comm_Tx__c = false,                             // Allow Credit Amount usage in Community
-            TREX1__Transaction_Line_Item__c = ae.TREX1__Transaction_Line_Item__c,                               // Transaction Line Item
+            TREX1__Transaction_Line_Item__c = ae.TREX1__Transaction_Line_Item__c,        // Transaction Line Item
+            TREX1__Transaction__c = ae.TREX1__Transaction__c,                            // Transaction
             TREX1__Available_Billing_Payment_Credit__c = false,                          // Credit Available For Billing Payment
             TREX1__Total_Reversed__c = 0.00,                                             // Total Reversed or Refunded
             TREX1__Has_Been_Summarized__c = false                                        // Has Been Summarized
@@ -260,7 +296,8 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
             TREX1__Is_Tax__c = false,                                                    // Is Tax
             GL_Account_Name__c = expiredCreditGlAccountName,                 // GL Account Name
             TREX1__Allow_Unapply_Cred_In_Comm_Tx__c = false,                             // Allow Credit Amount usage in Community
-            TREX1__Transaction_Line_Item__c = ae.TREX1__Transaction_Line_Item__c,                               // Transaction Line Item
+            TREX1__Transaction_Line_Item__c = ae.TREX1__Transaction_Line_Item__c,         // Transaction Line Item
+            TREX1__Transaction__c = ae.TREX1__Transaction__c,                             // Transaction
             TREX1__Available_Billing_Payment_Credit__c = false,                          // Credit Available For Billing Payment
             TREX1__Total_Reversed__c = 0.00,                                             // Total Reversed or Refunded
             TREX1__Has_Been_Summarized__c = false                                        // Has Been Summarized
@@ -282,6 +319,28 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
         // Set gl account names from map
         arGlAccountName = mapGlCodeToAccount.get(arGlCode);
         expiredCreditGlAccountName = mapGlCodeToAccount.get(expiredCreditGlCode);
+    }
+
+    private Id getGbgId() {
+        if (gbgId == null) {
+            gbgId = [SELECT Id FROM TREX1__Global_Billing_Group__c WHERE Name = 'Asphalt Green' LIMIT 1].Id;
+        }
+        return gbgId;
+    }
+
+    private Id getTaskUserId() {
+        if (taskUserId == null) {
+            List<User> lstUsers = [
+                SELECT Id 
+                  FROM User 
+                 WHERE Profile.Name = 'API Only' 
+                   AND IsActive = true 
+                 ORDER BY CreatedDate DESC 
+                 LIMIT 1
+            ];
+            taskUserId = !lstUsers.isEmpty() ? lstUsers.get(0).Id : UserInfo.getUserId();
+        }
+        return taskUserId;
     }
 
 }

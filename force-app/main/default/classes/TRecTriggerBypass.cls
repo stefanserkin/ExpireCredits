@@ -4,17 +4,26 @@
 public class TRecTriggerBypass {
 
     // Collection of sobject names to bypass
-    private static Set<String> setSObjectNames;
+    @testVisible private Set<String> setSObjectNames;
+    // The amount of minutes to activate the extension for
+    @testVisible private Integer expiryMinutes = 45;
     // The minimum time that must be remaining on an active bypass before it is extended in the request
     private static final Integer MIN_LIMIT_TIME_REMAINING = 15;
-    // The amount of minutes to activate the extension for
-    private static final Integer EXPIRY_MINUTES = 45;
     // Default notes for updated records where custom notes are not provided
     private static final String DEFAULT_NOTES = 'Custom bypass';
 
     /***************************************************
      * Activate
      ***************************************************/
+
+    /**
+     * Override the default duration that the bypass should be active
+     * @param Integer numberOfMinutes - the number of minutes before the bypass should expire
+     * @return void
+     */
+    public void setExpiryMinutes(Integer numberOfMinutes) {
+        expiryMinutes = numberOfMinutes;
+    }
 
     /**
      * Add an sobject to the collection to be bypassed
@@ -69,14 +78,13 @@ public class TRecTriggerBypass {
             SELECT Id, TREX1__SObject__c, TREX1__Active__c, TREX1__Expiry__c, TREX1__User_Ids__c, TREX1__Notes__c
               FROM TREX1__Trigger_Bypass__c 
              WHERE TREX1__SObject__c IN :sObjectTypes
-             LIMIT 1
         ];
         // Store in map to retrieve bypasses based on their sobject api name
         Map<String, TREX1__Trigger_Bypass__c> mapObjNameToBypass = new Map<String, TREX1__Trigger_Bypass__c>();
         for (TREX1__Trigger_Bypass__c tb : lstBypasses) {
             mapObjNameToBypass.put(tb.TREX1__SObject__c, tb);
         }
-        // Activate bypasses for each objects and add to list to upsert
+        // Activate bypasses for each object and add to list to upsert
         for (String sObj : sObjectTypes) {
             TREX1__Trigger_Bypass__c bypass;
             if (mapObjNameToBypass.containsKey(sObj)) {
@@ -91,7 +99,7 @@ public class TRecTriggerBypass {
                 }
 
                 bypass.TREX1__Active__c = true;
-                bypass.TREX1__Expiry__c = Datetime.now().addMinutes(EXPIRY_MINUTES);
+                bypass.TREX1__Expiry__c = Datetime.now().addMinutes(expiryMinutes);
                 bypass.TREX1__User_Ids__c = UserInfo.getUserId();
                 bypass.TREX1__Notes__c = notes;
             } else { 
@@ -99,7 +107,7 @@ public class TRecTriggerBypass {
                 bypass.Name = sObj;
                 bypass.TREX1__SObject__c = sObj;
                 bypass.TREX1__Active__c = true;
-                bypass.TREX1__Expiry__c = Datetime.now().addMinutes(EXPIRY_MINUTES);
+                bypass.TREX1__Expiry__c = Datetime.now().addMinutes(expiryMinutes);
                 bypass.TREX1__User_Ids__c = UserInfo.getUserId();
                 bypass.TREX1__Notes__c = notes;
             }

@@ -6,6 +6,10 @@
 //     SFDX: Execute Anonymous Apex with Editor Contents
 
 
+
+TRecCreditExpirationScheduler.run();
+
+/*
 Id accountId = '0016u00000c3wHJAAY';
 Id contactId = '0036u00000b2u81AAA';
 Id tliRecTypeId = '0125e000000iYFiAAM';
@@ -120,3 +124,25 @@ TREX1__Payment_Link__c sobj = new TREX1__Payment_Link__c(
   TREX1__Amount__c = amountToExpire        // Amount
 );
 insert sobj;
+
+Id recTypeId = Schema.SObjectType.Account.getRecordTypeInfosByDeveloperName().get('HH_Account').getRecordTypeId();
+
+List<Account> lstAccs = [
+  SELECT Id
+    FROM Account 
+   WHERE RecordTypeId = :recTypeId
+     AND Id IN (SELECT TREX1__Account__c 
+                  FROM TREX1__Journal_Entry__c 
+                 WHERE TREX1__Unapplied_Credit_Amount__c > 0
+                   AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:365)
+];
+System.debug(':::: found ' + lstAccs.size() + ' accounts');
+AggregateResult[] lstARs = [
+  SELECT sum(TREX1__Unapplied_Credit_Amount__c) sumCredit
+    FROM TREX1__Journal_Entry__c 
+   WHERE TREX1__Account__c IN :lstAccs
+     AND TREX1__Unapplied_Credit_Amount__c > 0
+     AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:365
+];
+System.debug('total credit: ' + lstARs[0].get('sumCredit'));
+*/

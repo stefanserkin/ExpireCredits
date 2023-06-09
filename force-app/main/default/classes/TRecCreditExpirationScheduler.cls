@@ -1,6 +1,6 @@
 public with sharing class TRecCreditExpirationScheduler implements Schedulable {
 
-    public static String schedule = '0 24 20 ? * *'; // Every day at 8:24pm
+    public static String schedule = '0 42 11 ? * *'; // Every day at 11:42am
 
     public static final String JOB_NAME = 'Expire Traction Rec Credits';
 
@@ -10,20 +10,8 @@ public with sharing class TRecCreditExpirationScheduler implements Schedulable {
     }
 
     public void execute(SchedulableContext context) {
-        // Activate trigger bypass for manual adjustment sobject types
-        TRecTriggerBypass bypass = new TRecTriggerBypass();
-        bypass.addObject('TREX1__Transaction__c');
-        bypass.addObject('TREX1__Transaction_Line_Item__c');
-        bypass.addObject('TREX1__Accounting_Event__c');
-        bypass.addObject('TREX1__Journal_Entry__c');
-        bypass.bypassAll(JOB_NAME);
-
-        // Execute batch
         TRecCreditExpirationBatch batch = new TRecCreditExpirationBatch();
-        Id batchId = Database.executeBatch(batch, 50);
-
-        // Disable Traction Rec trigger bypass for the sobject types
-        bypass.disableAllBypasses();
+        Id batchId = Database.executeBatch(batch, 5);
     }
 
 }
