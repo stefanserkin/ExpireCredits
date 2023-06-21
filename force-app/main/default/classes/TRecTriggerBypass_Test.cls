@@ -10,7 +10,7 @@ private class TRecTriggerBypass_Test {
         tb.setExpiryMinutes(numberOfMinutes);
         Test.stopTest();
 
-        Assert.areEqual(numberOfMinutes, tb.expiryMinutes, 'Should have overriden the private expiryMinutes variable');
+        Assert.areEqual(numberOfMinutes, tb.expiryMinutes, 'Should have overridden the private expiryMinutes variable');
     }
 
     @isTest
@@ -216,12 +216,60 @@ private class TRecTriggerBypass_Test {
 
     @isTest
     static void testDisableSingleBypass() {
-        
+        String sObjectName1 = 'TREX1__Journal_Entry__c';
+        String sObjectName2 = 'TREX1__Transaction__c';
+
+        TRecTriggerBypass tb = new TRecTriggerBypass();
+        tb.addObject(sObjectName1);
+        tb.addObject(sObjectName2);
+        tb.bypassAll();
+
+        Test.startTest();
+        tb.disableBypass(sObjectName1);
+        Test.stopTest();
+
+        List<TREX1__Trigger_Bypass__c> bypassesToVerify = [
+            SELECT Id, TREX1__SObject__c, TREX1__Active__c
+              FROM TREX1__Trigger_Bypass__c 
+             WHERE TREX1__SObject__c = :sObjectName1
+                OR TREX1__SObject__c = :sObjectName2
+             LIMIT 2
+        ];
+
+        Map<String, TREX1__Trigger_Bypass__c> mapObjNameToBypass = new Map<String, TREX1__Trigger_Bypass__c>();
+        for (TREX1__Trigger_Bypass__c bypassToVerify : bypassesToVerify) {
+            mapObjNameToBypass.put(bypassToVerify.TREX1__SObject__c, bypassToVerify);
+        }
+
+        Assert.isFalse(mapObjNameToBypass.get(sObjectName1).TREX1__Active__c, 'The first sobject bypass should have been deactivated');
+        Assert.isTrue(mapObjNameToBypass.get(sObjectName2).TREX1__Active__c, 'The second sobject bypass should not have been deactivated');
     }
 
     @isTest
     static void testDisableAllBypasses() {
-        
+        String sObjectName1 = 'TREX1__Journal_Entry__c';
+        String sObjectName2 = 'TREX1__Transaction__c';
+
+        TRecTriggerBypass tb = new TRecTriggerBypass();
+        tb.addObject(sObjectName1);
+        tb.addObject(sObjectName2);
+        tb.bypassAll();
+
+        Test.startTest();
+        tb.disableAllBypasses();
+        Test.stopTest();
+
+        List<TREX1__Trigger_Bypass__c> bypassesToVerify = [
+            SELECT Id, TREX1__Active__c
+              FROM TREX1__Trigger_Bypass__c 
+             WHERE TREX1__SObject__c = :sObjectName1
+                OR TREX1__SObject__c = :sObjectName2
+             LIMIT 2
+        ];
+
+        for (TREX1__Trigger_Bypass__c bypass : bypassesToVerify) {
+            Assert.isFalse(bypass.TREX1__Active__c, 'The first sobject bypass should have been deactivated');
+        }
     }
     
 }

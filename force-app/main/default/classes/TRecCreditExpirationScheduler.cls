@@ -11,7 +11,7 @@ public with sharing class TRecCreditExpirationScheduler implements Schedulable {
 
     public void execute(SchedulableContext context) {
         TRecCreditExpirationBatch batch = new TRecCreditExpirationBatch();
-        Id batchId = Database.executeBatch(batch, 5);
+        Id batchId = Database.executeBatch(batch, 50);
     }
 
 }
