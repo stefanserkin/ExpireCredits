@@ -6,7 +6,28 @@
 //     SFDX: Execute Anonymous Apex with Editor Contents
 
 
+TRecCreditExpirationScheduler.run();
+
+/*
+TRecCreditExpirationBatch batch = new TRecCreditExpirationBatch();
+Id batchId = Database.executeBatch(batch, 50);
+
+private static Id hhRecTypeId = Schema.SObjectType.Account.getRecordTypeInfosByDeveloperName().get('HH_Account').getRecordTypeId();
+String strQuery = 'SELECT Id FROM Account WHERE RecordTypeId = :hhRecTypeId AND Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c' +
+            ' WHERE TREX1__Unapplied_Credit_Amount__c > 0' +
+            // ' AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + daysUntilExpiration + ')';
+            ' AND TREX1__Effective_Date_Time__c >= 2023-05-01T00:00:00.000-04:00 ' + 
+            ' AND TREX1__Effective_Date_Time__c < 2023-06-01T00:00:00.000-04:00)';
+
+        // Check bypass for accounts with active billing schedules
+        if (true) {
+            strQuery += ' AND Id NOT IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c WHERE TREX1__Billing_Schedule__r.TREX1__Is_Billable__c = true)';
+        }
+        System.debug('::::::: size of list --> ' + Database.query(strQuery).size());
+*/
+/*
 Id gbgId = [SELECT Id FROM TREX1__Global_Billing_Group__c WHERE Name = 'Asphalt Green' LIMIT 1].Id;
+private static Id recTypeId = Schema.SObjectType.Account.getRecordTypeInfosByDeveloperName().get('HH_Account').getRecordTypeId();
 Id tliRecTypeId = Schema.SObjectType.TREX1__Transaction_Line_Item__c.getRecordTypeInfosByDeveloperName().get('Manual_Adjustment').getRecordTypeId();
 
 Decimal amount = 444.00;
@@ -15,6 +36,21 @@ Id ctId  = '0035900000TystgAAB';
 Id tId   = 'a3G59000000XmFREA0';
 Id tliId = 'a3F590000003XmGEAU';
 Id aeId  = 'a1F59000001ICTiEAO';
+*/
+
+/*
+String strQuery = 'SELECT Id FROM Account WHERE RecordTypeId = :recTypeId AND Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c' +
+            ' WHERE TREX1__Unapplied_Credit_Amount__c > 0' +
+            // ' AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + daysUntilExpiration + ')';
+
+            // TEST ONLY
+            ' AND TREX1__Effective_Date_Time__c <= 2023-06-07T00:00:00.000-04:00' + 
+            ' AND TREX1__Effective_Date_Time__c >= 2023-06-05T00:00:00.000-04:00)';
+
+Account[] lstAccs = Database.query(strQuery);
+System.debug('::::: size of list --> ' + lstAccs.size());
+
+*/
 
 /*
 insert new TREX1__Transaction_Line_Item__c(

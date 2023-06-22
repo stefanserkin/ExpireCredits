@@ -1,6 +1,6 @@
 public with sharing class TRecCreditExpirationScheduler implements Schedulable {
 
-    public static String schedule = '0 42 11 ? * *'; // Every day at 11:42am
+    public static String schedule = '0 56 14 ? * *'; // Every day at 2:56pm
 
     public static final String JOB_NAME = 'Expire Traction Rec Credits';
 
