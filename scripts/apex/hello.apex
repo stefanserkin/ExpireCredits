@@ -6,11 +6,49 @@
 //     SFDX: Execute Anonymous Apex with Editor Contents
 
 
-TRecCreditExpirationScheduler.run();
-
-/*
 TRecCreditExpirationBatch batch = new TRecCreditExpirationBatch();
 Id batchId = Database.executeBatch(batch, 50);
+
+
+/*
+Decimal amt = 520;
+TREX1__GL_Account__c revAcc = [SELECT Id, TREX1__GL_Account_Number__c FROM TREX1__GL_Account__c WHERE TREX1__Type__c = 'Income' ORDER BY CreatedDate DESC LIMIT 1];
+Contact ct = [SELECT Id, FirstName, LastName, AccountId FROM Contact WHERE FirstName = 'Beethoven' AND LastName = 'Dogg' LIMIT 1];
+
+TREX1__Accounting_Event__c accEv = new TREX1__Accounting_Event__c(         
+    TREX1__Effective_Date_Time__c = Datetime.now().addYears(-2),                              // Effective Date Time
+    TREX1__Total__c = amt,
+    TREX1__Account__c = ct.AccountId,                                   // Account
+    TREX1__Contact__c = ct.Id                                  // Contact
+);
+insert accEv;
+
+List<TREX1__Journal_Entry__c> lstJEs = new List<TREX1__Journal_Entry__c>();
+
+TREX1__Journal_Entry__c debitJe = new TREX1__Journal_Entry__c();
+debitJe.TREX1__Debit__c = amt;
+debitJe.TREX1__GL_Code__c = revAcc.TREX1__GL_Account_Number__c;
+debitJe.TREX1__Effective_Date_Time__c = Datetime.now().addYears(-2);
+debitJe.TREX1__Account__c = ct.AccountId;
+debitJe.TREX1__Contact__c = ct.Id;
+debitJe.TREX1__Accounting_Event__c = accEv.Id;
+lstJEs.add(debitJe);
+
+TREX1__Journal_Entry__c creditJe = new TREX1__Journal_Entry__c();
+creditJe.TREX1__Credit__c = amt;
+creditJe.TREX1__GL_Code__c = '10-10-000-12504';
+creditJe.TREX1__Effective_Date_Time__c = Datetime.now().addYears(-2);
+creditJe.TREX1__Account__c = ct.AccountId;
+creditJe.TREX1__Contact__c = ct.Id;
+creditJe.TREX1__Accounting_Event__c = accEv.Id;
+lstJEs.add(creditJe);
+
+insert lstJEs;
+*/
+// TRecCreditExpirationScheduler.run();
+
+/*
+
 
 private static Id hhRecTypeId = Schema.SObjectType.Account.getRecordTypeInfosByDeveloperName().get('HH_Account').getRecordTypeId();
 String strQuery = 'SELECT Id FROM Account WHERE RecordTypeId = :hhRecTypeId AND Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c' +

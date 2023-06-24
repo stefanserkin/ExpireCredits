@@ -2,7 +2,7 @@
  * @createdDate 2023-06-22
  * 
  * @description This batch expires Traction Rec credits by creating the equivalent of a manual adjustment 
- *   and linking the AR debit journal entry to the AR credit that should be expired.
+ *   and linking the AR debit journal entry to the AR credit that is expiring
  * 
  *   Batch Criteria and Settings
  *      - Only household accounts are subject to the policy. Organization accounts are excluded from the batch
@@ -52,6 +52,7 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
      ***************************************************/
     public Database.QueryLocator start(Database.BatchableContext bc) {
         TREX1__App_Config__c appConfig = TREX1__App_Config__c.getOrgDefaults();
+        // TODO - guard against null days until credit expiration
         Integer daysUntilExpiration = Integer.valueOf(appConfig.Days_Until_Credit_Expiration__c);
         Boolean preventCreditExpWithActiveBillingSchedule = appConfig.Prevent_Credit_Exp_with_Active_BS__c;
 
@@ -226,7 +227,7 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
 
             for (TREX1__Journal_Entry__c je : acc.TREX1__Journal_Entries__r) {
                 // Check for valid revenue account or apply the default expiration account
-                String glCode = je.Revenue_GL_Account__c != null ? je.Revenue_GL_Account__c : expiredCreditGlCode;
+                String glCode = !String.isBlank(je.Revenue_GL_Account__c) ? je.Revenue_GL_Account__c : expiredCreditGlCode;
                 // Add revenue account to map if it hasn't yet been added and set total amount to zero
                 if (!mapRevGlsToJes.containsKey(glCode)) {
                     mapRevGlsToAmount.put(glCode, 0);
@@ -410,6 +411,10 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
      ***************************************************/
 
     private Task getTaskFromWrapper(TRecExpiredCreditWrapper ecWrap) {
+        System.debug(':::::: ecWrap ::::::');
+        System.debug(ecWrap);
+        System.debug(':::: size of je list --> ' + ecWrap.lstJEsToExpire);
+        System.debug(ecWrap.lstJEsToExpire);
         Task t = new Task();
         String strTaskDescription = 'Credits ' + daysUntilCreditExpiration.format() + '+ days automatically expired';
         if (ecWrap.lstJEsToExpire.size() > 1) {
