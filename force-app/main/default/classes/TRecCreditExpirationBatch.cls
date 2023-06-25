@@ -411,10 +411,6 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
      ***************************************************/
 
     private Task getTaskFromWrapper(TRecExpiredCreditWrapper ecWrap) {
-        System.debug(':::::: ecWrap ::::::');
-        System.debug(ecWrap);
-        System.debug(':::: size of je list --> ' + ecWrap.lstJEsToExpire);
-        System.debug(ecWrap.lstJEsToExpire);
         Task t = new Task();
         String strTaskDescription = 'Credits ' + daysUntilCreditExpiration.format() + '+ days automatically expired';
         if (ecWrap.lstJEsToExpire.size() > 1) {
