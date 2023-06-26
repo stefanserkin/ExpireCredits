@@ -5,10 +5,26 @@
 // You can also execute the entire file by running the command:
 //     SFDX: Execute Anonymous Apex with Editor Contents
 
-
+/*
 TRecCreditExpirationBatch batch = new TRecCreditExpirationBatch();
 Id batchId = Database.executeBatch(batch, 50);
+*/
 
+String strQuery = 'SELECT Id FROM Account WHERE RecordType.DeveloperName = 'HH_Account' AND (TREX1__Outstanding_Account_Balance__c = NULL OR TREX1__Outstanding_Account_Balance__c = 0)' + 
+            ' AND Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c WHERE TREX1__Unapplied_Credit_Amount__c > 0 AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + 365 + ')';
+
+// Check bypass for accounts with active billing schedules
+if (true) {
+    strQuery += ' AND Id NOT IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c WHERE TREX1__Billing_Schedule__r.TREX1__Is_Billable__c = true)';
+}
+
+Account[] lstAccs = Database.query(strQuery);
+
+String strAccQuery = 'SELECT Id, npe01__One2OneContact__c, TREX1__Unapplied_Credit_Amount__c, (SELECT Id, TREX1__Credit__c, TREX1__Unapplied_Credit_Amount__c, TREX1__Effective_Date_Time__c, Revenue_GL_Account__c FROM TREX1__Journal_Entries__r' + 
+            ' WHERE TREX1__Unapplied_Credit_Amount__c > 0 ';
+        strAccQuery += ' AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + daysUntilCreditExpiration + ' ORDER BY Revenue_GL_Account__c ASC LIMIT 10000)' + 
+            ' FROM Account WHERE Id IN :lstAccounts';
+Account[] lstAccsToReturn = Database.query(strAccQuery);
 
 /*
 Decimal amt = 520;

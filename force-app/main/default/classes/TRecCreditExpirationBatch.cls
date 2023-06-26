@@ -2,19 +2,21 @@
  * @createdDate 2023-06-22
  * 
  * @description This batch expires Traction Rec credits by creating the equivalent of a manual adjustment 
- *   and linking the AR debit journal entry to the AR credit that is expiring
+ *   and linking the AR debit journal entry to the AR credit that is expiring.
  * 
  *   Batch Criteria and Settings
- *      - Only household accounts are subject to the policy. Organization accounts are excluded from the batch
- *      - Use the Days_Until_Credit_Expiration__c field in TREX1__App_Config__c custom setting to set the number of days before credits expire
+ *      - Only household accounts are subject to the policy. Organization accounts are excluded from the batch.
+ *      - Houshold accounts with existing balances are not included in the batch, since the credits can be linked to 
+ *          the existing balance.
+ *      - Use the Days_Until_Credit_Expiration__c field in TREX1__App_Config__c custom setting to set the number of days before credits expire.
  *      - Use the Prevent_Credit_Exp_with_Active_BS__c field in TREX1__App_Config__c custom setting to prevent credits from expiring for accounts 
- *          that currently have at least one active billing schedule
- *      - Use the Expired_Customer_Credits__c field in Global GL Accounts custom setting to define a default GL account to credit during expiration
+ *          that currently have at least one active billing schedule.
+ *      - Use the Expired_Customer_Credits__c field in Global GL Accounts custom setting to define a default GL account to credit during expiration.
  *          When a revenue account is available, it will be credited. If no revenue account is found, the default GL account is used.
  * 
  * @TODO
  *   - Add flag to GL Account obj to indicate whether it can receive revenue from expired credits
- *      Also potentially a way to designate a different account that should receive its expired credits
+ *      Also would be nice to have a way to designate a different account that should receive its expired credits
  *   - Handle revenue accounts from expiring credits that originated in a manual adjustment
  ****************************************************************************/
 public with sharing class TRecCreditExpirationBatch implements Database.Batchable<sObject> {
@@ -58,9 +60,8 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
 
         // Get all household account ids with credits to expire
         // Accounts will be re-queried for journal entry details within the execute method
-        String strQuery = 'SELECT Id FROM Account WHERE RecordTypeId = :hhRecTypeId AND Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c' +
-            ' WHERE TREX1__Unapplied_Credit_Amount__c > 0' +
-            ' AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + daysUntilExpiration + ')';
+        String strQuery = 'SELECT Id FROM Account WHERE RecordTypeId = :hhRecTypeId AND (TREX1__Outstanding_Account_Balance__c = NULL OR TREX1__Outstanding_Account_Balance__c = 0)' + 
+            ' AND Id IN (SELECT TREX1__Account__c FROM TREX1__Journal_Entry__c WHERE TREX1__Unapplied_Credit_Amount__c > 0 AND TREX1__Effective_Date_Time__c < LAST_N_DAYS:' + daysUntilExpiration + ')';
 
         // Check bypass for accounts with active billing schedules
         if (preventCreditExpWithActiveBillingSchedule) {
@@ -125,7 +126,9 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
         // Filter list to only debits
         List<TREX1__Journal_Entry__c> lstArDebits = new List<TREX1__Journal_Entry__c>();
         for (TREX1__Journal_Entry__c je : lstJes) {
-            if (je.TREX1__GL_Code__c == arGlCode) lstArDebits.add(je);
+            if (je.TREX1__GL_Code__c == arGlCode) {
+                lstArDebits.add(je);
+            }
         }
         for (TREX1__Journal_Entry__c debitJe : lstArDebits) {
             // Retrieve list of corresponding credits to expire from the wrapper id stored in the legacy id field
@@ -143,7 +146,9 @@ public with sharing class TRecCreditExpirationBatch implements Database.Batchabl
 
         // Set the transaction status to close
         // A Rec trigger will update the tli statuses, generate receipt pdfs, and recalculate account rollups
-        for (TREX1__Transaction__c t : lstTransactions) t.TREX1__Status__c = STATUS_FIRMED;
+        for (TREX1__Transaction__c t : lstTransactions) {
+            t.TREX1__Status__c = STATUS_FIRMED;
+        }
         update lstTransactions;
 
         // Add tasks to accounts to indicate completed credit expiration
